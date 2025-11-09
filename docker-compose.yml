@@ -1,48 +1,88 @@
-version: '3.8'
-
 services:
   node-exporter:
     image: prom/node-exporter:v1.8.2
     container_name: node-exporter
     restart: unless-stopped
+    security_opt:
+      - apparmor=unconfined
     volumes:
-      - /proc:/proc:ro
-      - /sys:/sys:ro
-      - /:/rootfs:ro
+      - /:/host:ro,rslave
     command:
-      - '--path.procfs=/proc'
-      - '--path.sysfs=/sys'
-      - '--collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc)($$|/)'
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/host'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    pid: host
     ports:
       - "9100:9100"
-
+    networks:
+      - monitoring 
+      
   prometheus:
     image: prom/prometheus:v2.54.1
     container_name: prometheus
     restart: unless-stopped
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
-      - prometheus_data:/prometheus
     ports:
       - "9090:9090"
+    networks:
+      - monitoring 
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
       - '--web.enable-lifecycle'
-
+      
+  postgres_exporter:
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.15.0
+    container_name: postgres_exporter
+    restart: unless-stopped
+    environment:
+      DATA_SOURCE_NAME: "postgresql://admin_db:${POSTGRES_DB_PASSWORD}@postgres:5432/${POSTGRES_DB_URL}"
+    ports:
+      - "9187:9187"
+    networks:
+      - monitoring    
+      
+  cadvisor:
+    image: docker.io/google/cadvisor:latest
+    container_name: cadvisor
+    restart: unless-stopped
+    security_opt:
+      - apparmor=unconfined
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    ports:
+      - "8080:8080"
+    networks:
+      - monitoring 
+    command:
+      - '--port=8080'
+      - '--housekeeping_interval=10s'
+    privileged: true
+    
   grafana:
     image: grafana/grafana:11.1.0
     container_name: grafana
     restart: unless-stopped
-    ports:
-      - "3000:3000"
+    env_file:
+      - .env
+    networks:
+      - monitoring 
     volumes:
       - grafana_data:/var/lib/grafana
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
+    ports:
+      - "3000:3000"
+networks:
+  monitoring:
+    external: true
 
 volumes:
-  prometheus_data:
   grafana_data:
